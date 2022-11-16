@@ -16,7 +16,9 @@ public class EnrollmenFileProcessorImplTest {
 	private String basicFile = "testfile1.csv";
 	private String basicFileWithHeader = "testfile1WithHeader.csv";
 	
-	private String malformedContentFile = "fileWithExtraDelimiter.csv";
+	private String malformedContentFile = "testfileWithExtraDelimiter.csv";
+	
+	private String fileWithBadVersion = "testfileWithNonIntVersion.csv";
 		
 	private EnrollmentFileProcessorService enrollmentFileProcessorService;
 	
@@ -85,6 +87,23 @@ public class EnrollmenFileProcessorImplTest {
 		} catch (Exception e) {
 			assertTrue(e.getMessage().contains("Malformed line entry"));
 		}		
-	}		
+	}
+	
+	@Test
+	public void testBadVersionFileFail() {
+		enrollmentFileProcessorService = new EnrollmentFileProcessorServiceImpl(
+				true,
+				false,
+				true,
+				inputFolder, 
+				outputFolder,
+				",");
+		try {
+			enrollmentFileProcessorService.processEnrollmentFile(fileWithBadVersion);
+			fail("Error should be thrown");
+		} catch (Exception e) {
+			assertTrue(e.getMessage().contains("Version field was not integer"));
+		}		
+	}	
 	
 }
