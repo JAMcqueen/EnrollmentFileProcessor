@@ -113,9 +113,12 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 	private void processEnrollmentFile(File file) throws Exception {				
 		// convert file contents into lists of enrollment entries, grouped by insurance company
 		populateEnrollmentFileEntryListMap(file);
+		
 		// only keep highest version of entries for each user id
 		filterLowerUserIdVersions();
+		
 		// sort insurance company lists by first name, last name
+		outputInfo("Sorting enrollment entries...");
 		for(List<EnrollmentFileEntry> insuranceCompanyList: enrollmentFileEntryListMap.values()) {
 			Collections.sort(insuranceCompanyList, entryComparator);
 		}
@@ -124,6 +127,7 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 	}
 
 	private void populateEnrollmentFileEntryListMap(File file) throws Exception{
+		outputInfo("Extracting enrollment entries from input file...");
 		try (BufferedReader br = new BufferedReader(new FileReader(file))) {
 			int lineCount = 0;
 			String line;		
@@ -222,6 +226,7 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 	}
 	
 	private void filterLowerUserIdVersions() {
+		outputInfo("Condensing multiple userID entries...");
 		Map<String, EnrollmentFileEntry> tempEntryMap = new HashMap<>();
 		Map<String, List<EnrollmentFileEntry>> tempEnrollmentFileEntryListMap = 
 			new HashMap<String, List<EnrollmentFileEntry>>();
@@ -250,6 +255,7 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 	
 	
 	private void writeEntryListsToFiles() {
+		outputInfo("Writing insurance company files...");
 		DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(
 				EnrollmentFileProcessorConstants.FILE_TIMESTAMP_FORMAT);	
 		String fileTimeStamp = dateTimeFormatter.format(LocalDateTime.now());	
