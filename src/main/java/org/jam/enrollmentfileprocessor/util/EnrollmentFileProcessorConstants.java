@@ -11,9 +11,10 @@ public class EnrollmentFileProcessorConstants {
 	public static final int VERSION_FIELD_INDEX = 3;
 	public static final int INSURANCE_COMP_NAME_FIELD_INDEX = 4;
 	
-	public static final String DEFAULT_INPUT_FOLDER = "input";
-	public static final String DEFAULT_OUTPUT_FOLDER = "output";
+	public static final String DEFAULT_INPUT_FOLDER = "fileInput";
+	public static final String DEFAULT_OUTPUT_FOLDER = "fileOutput";
 	
-	public static final String fieldNames[] = 
-		new String[]{"user ID", "first name", "last name", "version", "insurance company" };
+	public static final String OUTPUT_FILE_PREFIX = "Enrollment_File";
+	
+	public static final String FILE_TIMESTAMP_FORMAT = "yyyyMMdd_HHmmss";
 }

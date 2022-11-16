@@ -2,13 +2,18 @@ package org.jam.enrollmentfileprocessor.service;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.PrintWriter;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.jam.enrollmentfileprocessor.model.EnrollmentFileEntry;
 import org.jam.enrollmentfileprocessor.util.EnrollmentFileProcessorConstants;
@@ -20,7 +25,9 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 	private boolean stopProcessingOnMalformedEntry = false;
 	private String inputFolder; 
 	private String outputFolder; 
+	private String delimiter;
 	
+
 	private Map<String, List<EnrollmentFileEntry>> enrollmentFileEntryListMap;
 	
 	private Comparator<EnrollmentFileEntry> entryComparator =
@@ -32,73 +39,118 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 		
 		inputFolder = EnrollmentFileProcessorConstants.DEFAULT_INPUT_FOLDER; 
 		outputFolder = EnrollmentFileProcessorConstants.DEFAULT_OUTPUT_FOLDER;
+		
+		delimiter = EnrollmentFileProcessorConstants.DELIMITER;
 	}
 
-	public EnrollmentFileProcessorServiceImpl(boolean outputInfo, boolean hasHeader,
+	public EnrollmentFileProcessorServiceImpl(
+			String inputFolder,
+			String outputFolder) {
+		enrollmentFileEntryListMap = new HashMap<String, List<EnrollmentFileEntry>>();
+		
+		this.inputFolder = inputFolder; 
+		this.outputFolder = outputFolder;	
+		
+		delimiter = EnrollmentFileProcessorConstants.DELIMITER;
+	}	
+	
+	public EnrollmentFileProcessorServiceImpl(
+			boolean outputInfo, 
+			boolean hasHeader,
 			boolean stopProcessingOnMalformedEntry) {
 		enrollmentFileEntryListMap = new HashMap<String, List<EnrollmentFileEntry>>();
 		
 		inputFolder = EnrollmentFileProcessorConstants.DEFAULT_INPUT_FOLDER; 
 		outputFolder = EnrollmentFileProcessorConstants.DEFAULT_OUTPUT_FOLDER;
 		
+		delimiter = EnrollmentFileProcessorConstants.DELIMITER;
+		
 		this.outputInfo = outputInfo;
 		this.hasHeader = hasHeader;
 		this.stopProcessingOnMalformedEntry = stopProcessingOnMalformedEntry;	
 	}
+	
+	public EnrollmentFileProcessorServiceImpl(
+			boolean outputInfo, 
+			boolean hasHeader,
+			boolean stopProcessingOnMalformedEntry,
+			String inputFolder,
+			String outputFolder,
+			String delimiter) {
+		enrollmentFileEntryListMap = new HashMap<String, List<EnrollmentFileEntry>>();
+		
+		this.inputFolder = inputFolder; 
+		this.outputFolder = outputFolder;
+		
+		this.delimiter = delimiter;
+		
+		this.outputInfo = outputInfo;
+		this.hasHeader = hasHeader;
+		this.stopProcessingOnMalformedEntry = stopProcessingOnMalformedEntry;	
+	}	
 
 	@Override
 	public void processEnrollmentFile(String fileName) throws Exception {
 		if (fileName == null) {
-			outputInfo("File name is null");
 			throw new Exception("File name is null");
 		} else if (fileName.length() == 0) {
-			outputInfo("File name is empty");
 			throw new Exception("File name is empty");
 		}
 
 		String filePath = inputFolder + "\\" + fileName;
 		File file = new File(filePath);
 		if (!file.exists()) {
-			outputInfo(String.format("File at path %s does not exist", filePath));
 			throw new Exception(String.format("File at path %s does not exist", filePath));
 		} else if (file.isDirectory()) {
-			outputInfo(String.format("path %s points to directory", filePath));
 			throw new Exception(String.format("Path %s points to directory", filePath));
 		}
 
+		enrollmentFileEntryListMap.clear();
+		
 		processEnrollmentFile(file);
 	}
 
-	private void processEnrollmentFile(File file) {
+	private void processEnrollmentFile(File file) throws Exception {				
+		// convert file contents into lists of enrollment entries, grouped by insurance company
 		populateEnrollmentFileEntryListMap(file);
-		filterDuplicateIds();
-		// sort insurance company lists by first name, lastname
+		// only keep highest version of entries for each user id
+		filterLowerUserIdVersions();
+		// sort insurance company lists by first name, last name
 		for(List<EnrollmentFileEntry> insuranceCompanyList: enrollmentFileEntryListMap.values()) {
 			Collections.sort(insuranceCompanyList, entryComparator);
 		}
-		String thing = "thing";
-		// output file
+		// write each list to separate csv files
+		writeEntryListsToFiles();
 	}
 
-	private void populateEnrollmentFileEntryListMap(File file) {
+	private void populateEnrollmentFileEntryListMap(File file) throws Exception{
 		try (BufferedReader br = new BufferedReader(new FileReader(file))) {
+			int lineCount = 0;
 			String line;		
 			
 			while ((line = br.readLine()) != null) {			
-				if (hasHeader) {
+				if (hasHeader && lineCount == 0) {
+					lineCount++;
 					continue;
 				}
-
-				EnrollmentFileEntry entry = processEnrollmentFileLine(line);
-				addEntryToInsuranceCompanyMapList(entry);
+				EnrollmentFileEntry enrollmentFileEntry = processEnrollmentFileLine(line);
+				if(enrollmentFileEntry != null) {
+					addEntryToInsuranceCompanyMapList(enrollmentFileEntry);
+				}
+				lineCount++;
 			}			
 		} catch (Exception e) {
-			outputInfo(String.format("Error in populateEnrollmentFileEntryListMap: %s", e.getMessage()));
+			outputInfo(String.format("Error in populateEnrollmentFileEntryListMap: %s", 
+				e.getMessage()));
+			throw e;
 		}
 	}
 
 	private EnrollmentFileEntry processEnrollmentFileLine(String line) throws Exception {
-		String[] lineValues = line.split(EnrollmentFileProcessorConstants.DELIMITER);
+		List<String> lineValues = List.of(line.split(delimiter))
+			.stream()
+			.map(String::strip)
+			.collect(Collectors.toList());
 		EnrollmentFileEntry enrollmentFileEntry = null;
 
 		try {
@@ -106,16 +158,17 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 
 			enrollmentFileEntry = new EnrollmentFileEntry();
 			enrollmentFileEntry.setUserId(
-					lineValues[EnrollmentFileProcessorConstants.USER_ID_FIELD_INDEX]);
+				lineValues.get(EnrollmentFileProcessorConstants.USER_ID_FIELD_INDEX));
 			enrollmentFileEntry.setFirstName(
-					lineValues[EnrollmentFileProcessorConstants.FIRST_NAME_FIELD_INDEX]);
+					lineValues.get(EnrollmentFileProcessorConstants.FIRST_NAME_FIELD_INDEX));
 			enrollmentFileEntry.setLastName(
-					lineValues[EnrollmentFileProcessorConstants.LAST_NAME_FIELD_INDEX]);
+					lineValues.get(EnrollmentFileProcessorConstants.LAST_NAME_FIELD_INDEX));
 			enrollmentFileEntry.setVersion(Integer.valueOf
-					(lineValues[EnrollmentFileProcessorConstants.VERSION_FIELD_INDEX]));
+				(lineValues.get(EnrollmentFileProcessorConstants.VERSION_FIELD_INDEX)));
 			enrollmentFileEntry.setInsuranceCompany(
-					lineValues[EnrollmentFileProcessorConstants.INSURANCE_COMP_NAME_FIELD_INDEX]);
+				lineValues.get(EnrollmentFileProcessorConstants.INSURANCE_COMP_NAME_FIELD_INDEX));
 		} catch (Exception e) {
+			outputInfo(e.getMessage());
 			if (stopProcessingOnMalformedEntry) {
 				throw e;
 			}
@@ -124,37 +177,34 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 		return enrollmentFileEntry;
 	}
 
-	private void validateFields(String[] lineValues, String line) throws Exception {
+	private void validateFields(List<String> lineValues, String line) throws Exception {
 		// validate # of fields is correct
-		if (lineValues.length != EnrollmentFileProcessorConstants.ENTRY_FIELD_COUNT) {
+		if (lineValues.size() != EnrollmentFileProcessorConstants.ENTRY_FIELD_COUNT) {
 			outputInfo(String.format("Entry %s has different number of expected fields", line));
-			outputInfo(String.format("Expected: %d, Actual: %d", EnrollmentFileProcessorConstants.ENTRY_FIELD_COUNT,
-					lineValues.length));
-			outputInfo(
-					String.format("Check entry matches expected format " + 
-							"and fields do not contain the delimeter %s",
-							EnrollmentFileProcessorConstants.DELIMITER));
+			outputInfo(String.format("Expected: %d, Actual: %d", 
+				EnrollmentFileProcessorConstants.ENTRY_FIELD_COUNT,
+				lineValues.size()));
+			outputInfo(String.format("Check entry matches expected format " + 
+				"and fields do not contain the delimeter %s", delimiter));
 			throw new Exception(String.format("Malformed line entry: %s", line));
 		}
 
-		// validate fields contain data
-		for (int fieldIndex = 0; fieldIndex < lineValues.length; fieldIndex++) {
-			if (lineValues[fieldIndex].strip().length() == 0) {
-				outputInfo(String.format("Field %d was blank in line %s", fieldIndex, line));
+		// validate that fields contain data
+		for (int fieldIndex = 0; fieldIndex < lineValues.size(); fieldIndex++) {
+			if (lineValues.get(fieldIndex).strip().length() == 0) {
 				throw new Exception(String.format("Field %d was blank in line %s", fieldIndex, line));
 			}
 		}
 
 		// only validating version; other fields can be strings and validating their
-		// content
-		// is beyond the scope of this example
+		// content is beyond the scope of this example
 		try {
-			int version = Integer.parseInt(lineValues[EnrollmentFileProcessorConstants.VERSION_FIELD_INDEX]);
+			int version = Integer.parseInt(
+				lineValues.get(EnrollmentFileProcessorConstants.VERSION_FIELD_INDEX));
 			if (version < 0) {
-				throw new Exception(String.format(String.format("Negative version field in line %s", line)));
+				throw new Exception(String.format("Negative version field in line %s", line));
 			}
 		} catch (NumberFormatException nfe) {
-			outputInfo(String.format("version field was not integer in line %s", line));
 			throw new Exception(String.format("Version field was not integer in line %s", line));
 		}
 	}
@@ -171,7 +221,7 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 		entryList.add(entry);
 	}
 	
-	private void filterDuplicateIds() {
+	private void filterLowerUserIdVersions() {
 		Map<String, EnrollmentFileEntry> tempEntryMap = new HashMap<>();
 		Map<String, List<EnrollmentFileEntry>> tempEnrollmentFileEntryListMap = 
 			new HashMap<String, List<EnrollmentFileEntry>>();
@@ -200,9 +250,53 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 	
 	
 	private void writeEntryListsToFiles() {
+		DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ofPattern(
+				EnrollmentFileProcessorConstants.FILE_TIMESTAMP_FORMAT);	
+		String fileTimeStamp = dateTimeFormatter.format(LocalDateTime.now());	
 		
+		for(List<EnrollmentFileEntry> insuranceCompanyList: enrollmentFileEntryListMap.values()) {
+			String outputFilePath = outputFolder + "\\" + generateFileName(
+					insuranceCompanyList.get(0).getInsuranceCompany(), fileTimeStamp);
+			File outputFile = new File(outputFilePath);
+			
+		    try (PrintWriter printWriter = new PrintWriter(outputFile)) {
+		    	insuranceCompanyList.stream()
+		        	.map(this::convertEntryToString)
+		            .forEach(printWriter::println);
+		    } catch (FileNotFoundException e) {
+		    	outputInfo(String.format("Output file location %s does not exist", outputFilePath));
+			}
+		}
 	}
 
+	private String generateFileName(String insuranceCompanyName, String fileTimeStamp) {
+		StringBuilder sb = new StringBuilder();	
+		
+		sb.append(EnrollmentFileProcessorConstants.OUTPUT_FILE_PREFIX)
+			.append("_")
+			.append(insuranceCompanyName.replaceAll("\\s+", "_"))
+			.append("_")
+			.append(fileTimeStamp)
+			.append(".csv");
+		
+		return sb.toString();
+	}
+	
+	private String convertEntryToString(EnrollmentFileEntry entry) {
+		StringBuilder sb = new StringBuilder();	
+		
+		sb.append(entry.getUserId())
+			.append(delimiter)
+			.append(entry.getFirstName())
+			.append(delimiter)
+			.append(entry.getLastName())
+			.append(delimiter)
+			.append(entry.getVersion())
+			.append(delimiter)
+			.append(entry.getInsuranceCompany());
+		
+		return sb.toString();
+	}
 
 	private void outputInfo(String info) {
 		if (outputInfo) {
@@ -244,6 +338,13 @@ public class EnrollmentFileProcessorServiceImpl implements EnrollmentFileProcess
 	}
 	public void setOutputFolder(String outputFolder) {
 		this.outputFolder = outputFolder;
+	}
+
+	public String getDelimiter() {
+		return delimiter;
+	}
+	public void setDelimiter(String delimiter) {
+		this.delimiter = delimiter;
 	}
 
 }
